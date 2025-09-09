@@ -1,5 +1,5 @@
-# flstorage
-**flstorage** is a blockchain built using Cosmos SDK and Tendermint and created with [Ignite CLI](https://ignite.com/cli).
+# fls-client
+This repository is for submitting the original Round learning results of flstorage and uploading and downloading originalHash and tags.
 
 
 ## Environment
