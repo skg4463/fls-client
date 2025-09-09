@@ -1,0 +1,83 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+
+# Machine Learning model files (binary files are usually large)
+*.bin
+*.model
+*.pkl
+*.h5
+*.pt
+*.pth
+*.ckpt
+
+# Large data files
+*.csv
+*.json
+*.xml
+*.txt
+!README.txt
+!main-chain-design.txt
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+build/
+dist/
+bin/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Shard files (these appear to be data chunks that might be large)
+uploader/shards/*
+downloader/downloads/*
+
+# Node modules (if any Node.js tools are used)
+node_modules/
+
+# Python cache (if any Python tools are used)
+__pycache__/
+*.py[cod]
+*$py.class
