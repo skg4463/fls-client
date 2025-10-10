@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# --- 스크립트 안전장치 ---
+# 어떤 명령어든 실패하면 즉시 스크립트를 중단.
+set -e
+
 # --- 설정 ---
 MAINCHAIN_NODE="tcp://localhost:26658"
 MAINCHAIN_BIN="flmainchaind"
@@ -10,12 +14,19 @@ TOTAL_ROUNDS_TO_RUN=3 # 이번에 실행할 라운드 수
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # 색상 초기화
+
+# --- 0. 오프체인 클라이언트 사전 컴파일 ---
+echo -e "${BLUE}Compiling off-chain clients...${NC}"
+(cd uploader && go mod tidy && go build -o uploader)
+(cd downloader && go mod tidy && go build -o downloader)
+echo -e "${GREEN}Clients compiled successfully.${NC}"
 
 # --- 헬퍼 함수 ---
 # 주소-이름 매핑 생성
 function create_addr_map {
-    echo -e "${BLUE}Creating address-to-name map...${NC}"
+    echo -e "\n${BLUE}Creating address-to-name map...${NC}"
     declare -gA ADDR_TO_NAME
     for i in {0..9}; do
         addr=$($MAINCHAIN_BIN keys show "node$i" -a)
@@ -27,7 +38,7 @@ function create_addr_map {
 # --- 1. 현재 라운드 확인 및 자동 초기화 ---
 function init_or_get_start_round {
     echo -e "\n${BLUE}Checking for current round...${NC}"
-    CURRENT_ROUND_INFO=$($MAINCHAIN_BIN query fedlearning show-current-round --node $MAINCHAIN_NODE -o json 2>/dev/null)
+    CURRENT_ROUND_INFO=$($MAINCHAIN_BIN query fedlearning show-current-round --node $MAINCHAIN_NODE -o json 2>/dev/null || true)
     START_ROUND=$(echo "$CURRENT_ROUND_INFO" | jq -r '.current_round.round_id')
 
     if [ -z "$START_ROUND" ] || [ "$START_ROUND" == "null" ]; then
@@ -35,9 +46,7 @@ function init_or_get_start_round {
         START_ROUND=1
         
         declare -a all_addrs
-        for i in {0..9}; do
-            all_addrs+=($($MAINCHAIN_BIN keys show "node$i" -a))
-        done
+        for i in {0..9}; do all_addrs+=($($MAINCHAIN_BIN keys show "node$i" -a)); done
         ALL_MEMBERS=$(IFS=,; echo "${all_addrs[*]}")
         INITIAL_C_NODES=$(IFS=,; echo "${all_addrs[*]:0:5}")
         
@@ -47,7 +56,6 @@ function init_or_get_start_round {
     else
         echo -e "${GREEN}Found existing round. Starting simulation from Round $START_ROUND.${NC}"
     fi
-    # 전역 변수로 START_ROUND를 반환
     eval "$1=$START_ROUND"
 }
 
@@ -56,7 +64,7 @@ create_addr_map
 init_or_get_start_round START_ROUND
 
 # --- 메인 시뮬레이션 루프 ---
-for (( round_id=$START_ROUND; round_id<$START_ROUND+$TOTAL_ROUNDS_TO_RUN; round_id++ )); do
+for (( round_id=$START_ROUND; round_id<=$START_ROUND+$TOTAL_ROUNDS_TO_RUN-1; round_id++ )); do
     echo -e "\n${YELLOW}#####################################################${NC}"
     echo -e "${YELLOW}### STARTING ROUND $round_id"
     echo -e "${YELLOW}#####################################################${NC}\n"
@@ -72,89 +80,108 @@ for (( round_id=$START_ROUND; round_id<$START_ROUND+$TOTAL_ROUNDS_TO_RUN; round_
     echo -e "${GREEN}Committee members:${NC}"
     is_cl=true
     for addr in "${C_NODES_ADDRS[@]}"; do
-        if [ "$is_cl" = true ]; then
-            echo "  - ${ADDR_TO_NAME[$addr]} (CL-Node) ($addr)"
-            is_cl=false
-        else
-            echo "  - ${ADDR_TO_NAME[$addr]} ($addr)"
-        fi
-    done
-    echo ""
+        if [ "$is_cl" = true ]; then echo "  - ${ADDR_TO_NAME[$addr]} (CL-Node) ($addr)"; is_cl=false
+        else echo "  - ${ADDR_TO_NAME[$addr]} ($addr)"; fi
+    done; echo ""
 
     CURRENT_STATUS=$(echo "$ROUND_INFO" | jq -r '.round.status')
     echo -e "${YELLOW}--- Phase 1: L-node Submissions (status: $CURRENT_STATUS) ---${NC}"
+    
+    total_lnode_duration=0; lnode_count=0
     declare -A ORIGINAL_HASHES
     for lnode_addr in "${L_NODES_ADDRS[@]}"; do
+        start_time_single_lnode=$(date +%s.%N)
         lnode_name=${ADDR_TO_NAME[$lnode_addr]}
         LNODE_ADDR_SIDE=$($SIDECHAIN_BIN keys show $lnode_name -a)
-        DUMMY_FILE="dummy_weight_$lnode_name.bin"; dd if=/dev/urandom of="uploader/$DUMMY_FILE" bs=1k count=1 status=none
-        
-        UPLOAD_OUTPUT=$(cd uploader && go run main.go "./$DUMMY_FILE" "$round_id-$lnode_name-flstorage" "$LNODE_ADDR_SIDE")
+        TAG="$round_id-$lnode_name-flstorage"
+        DUMMY_FILE="uploader/dummy_weight_$lnode_name.bin"; dd if=/dev/urandom of="$DUMMY_FILE" bs=1k count=1 status=none
+        UPLOAD_OUTPUT=$(./uploader/uploader "$DUMMY_FILE" "$TAG" "$LNODE_ADDR_SIDE")
         ORIGINAL_HASH=$(echo "$UPLOAD_OUTPUT" | grep "Original file hash:" | cut -d' ' -f4)
         ORIGINAL_HASHES[$lnode_addr]=$ORIGINAL_HASH
-        
-        $MAINCHAIN_BIN tx fedlearning submit-weight $round_id $ORIGINAL_HASH "$round_id-$lnode_name-flstorage" --from $lnode_name --node $MAINCHAIN_NODE -y > /dev/null 2>&1
-        echo "  - L-node [$lnode_name] submitted."
+        $MAINCHAIN_BIN tx fedlearning submit-weight $round_id $ORIGINAL_HASH "$TAG" --from $lnode_name --node $MAINCHAIN_NODE -y > /dev/null 2>&1
+        end_time_single_lnode=$(date +%s.%N)
+        duration_single_lnode=$(awk -v start="$start_time_single_lnode" -v end="$end_time_single_lnode" 'BEGIN {print end - start}')
+        total_lnode_duration=$(awk -v total="$total_lnode_duration" -v current="$duration_single_lnode" 'BEGIN {print total + current}')
+        lnode_count=$((lnode_count + 1))
+        printf "  - L-node [%-6s] submitted in ${CYAN}%.2f s${NC}. tag: %-25s, originalHash: %.15s...\n" "$lnode_name" "$duration_single_lnode" "$TAG" "$ORIGINAL_HASH"
     done
+    
+    average_lnode_time=$(awk -v total="$total_lnode_duration" -v count="$lnode_count" 'BEGIN { if (count > 0) print total / count; else print 0 }')
+    printf "${GREEN}L-node phase completed. Average submission time: %.2f seconds.${NC}\n" $average_lnode_time
     
     echo -e "\n${BLUE}Waiting for round to advance to 'ScoreSubmissionOpen'...${NC}"
     while true; do
         STATUS=$($MAINCHAIN_BIN query fedlearning show-round $round_id --node $MAINCHAIN_NODE -o json | jq -r '.round.status')
-        if [ "$STATUS" == "ScoreSubmissionOpen" ]; then
-            echo -e "${GREEN}Status is now $STATUS. Proceeding.${NC}"; break
-        fi; sleep 2
+        if [ "$STATUS" == "ScoreSubmissionOpen" ]; then echo -e "${GREEN}Status is now $STATUS. Proceeding.${NC}"; break; fi; sleep 1
     done; echo ""
 
     CURRENT_STATUS=$($MAINCHAIN_BIN query fedlearning show-round $round_id --node $MAINCHAIN_NODE -o json | jq -r '.round.status')
     echo -e "${YELLOW}--- Phase 2: C-node Submissions (status: $CURRENT_STATUS) ---${NC}"
+    
+    total_cnode_duration=0; cnode_count=0
     for cnode_addr in "${C_NODES_ADDRS[@]}"; do
+        start_time_single_cnode=$(date +%s.%N)
         cnode_name=${ADDR_TO_NAME[$cnode_addr]}; SCORED_LNODES_STR=""; SCORES_STR=""
         for lnode_addr in "${!ORIGINAL_HASHES[@]}"; do
             SCORE=$((RANDOM % 21 + 70)); SCORED_LNODES_STR+="$lnode_addr,"; SCORES_STR+="$SCORE,"
         done
         SCORED_LNODES_STR=${SCORED_LNODES_STR%?}; SCORE_STR=${SCORES_STR%?}
         $MAINCHAIN_BIN tx fedlearning submit-score $round_id "$SCORED_LNODES_STR" "$SCORE_STR" --from $cnode_name --node $MAINCHAIN_NODE -y > /dev/null 2>&1
-        echo "  - C-node [$cnode_name] submitted scores."
+        end_time_single_cnode=$(date +%s.%N)
+        duration_single_cnode=$(awk -v start="$start_time_single_cnode" -v end="$end_time_single_cnode" 'BEGIN {print end - start}')
+        total_cnode_duration=$(awk -v total="$total_cnode_duration" -v current="$duration_single_cnode" 'BEGIN {print total + current}')
+        cnode_count=$((cnode_count + 1))
+        printf "  - C-node [%-6s] submitted scores in ${CYAN}%.2f s${NC}.\n" "$cnode_name" "$duration_single_cnode"
     done
     
+    average_cnode_time=$(awk -v total="$total_cnode_duration" -v count="$cnode_count" 'BEGIN { if (count > 0) print total / count; else print 0 }')
+    printf "${GREEN}C-node phase completed. Average submission time: %.2f seconds.${NC}\n" $average_cnode_time
+    
+    # C-node 제출이 끝난 직후의 시간을 집계 시작 시간으로 기록.
+    start_time_agg=$(date +%s.%N)
     echo -e "\n${BLUE}Waiting for ATT aggregation... (current: ${YELLOW}$CURRENT_STATUS${BLUE})${NC}"
     while true; do
         STATUS=$($MAINCHAIN_BIN query fedlearning show-round $round_id --node $MAINCHAIN_NODE -o json | jq -r '.round.status')
         if [ "$STATUS" == "AggregationComplete" ]; then
-            echo -e "${GREEN}Status is now $STATUS.${NC}"
-            # ATT 집계 결과 즉시 출력
+            end_time_agg=$(date +%s.%N)
+            duration_agg=$(awk -v start="$start_time_agg" -v end="$end_time_agg" 'BEGIN {print end - start}')
+            printf "${GREEN}ATT aggregation completed in approximately %.2f seconds.${NC}\n" $duration_agg
+            
             echo -e "${GREEN}Final ATT for Round $round_id:${NC}"
             ATT_JSON=$($MAINCHAIN_BIN query fedlearning show-final-att $round_id --node $MAINCHAIN_NODE -o json)
             length=$(echo "$ATT_JSON" | jq '.final_att.lnode_addresses | length')
             for (( i=0; i<$length; i++ )); do
-                addr=$(echo "$ATT_JSON" | jq -r ".final_att.lnode_addresses[$i]")
-                score=$(echo "$ATT_JSON" | jq -r ".final_att.scores[$i]")
-                name=${ADDR_TO_NAME[$addr]}
+                addr=$(echo "$ATT_JSON" | jq -r ".final_att.lnode_addresses[$i]"); score=$(echo "$ATT_JSON" | jq -r ".final_att.scores[$i]"); name=${ADDR_TO_NAME[$addr]}
                 printf "  - %-6s - Score: %-3s - %s\n" "$name" "$score" "$addr"
-            done
-            break
-        fi; sleep 2
+            done; break
+        fi; sleep 1
     done; echo ""
     
     CL_NODE_ADDR=${C_NODES_ADDRS[0]}; CL_NODE_NAME=${ADDR_TO_NAME[$CL_NODE_ADDR]}
     CURRENT_STATUS=$($MAINCHAIN_BIN query fedlearning show-round $round_id --node $MAINCHAIN_NODE -o json | jq -r '.round.status')
     echo -e "${YELLOW}--- Phase 3: CL-node [$CL_NODE_NAME] Global Model Submission (status: $CURRENT_STATUS) ---${NC}"
-    CL_NODE_ADDR_SIDE=$($SIDECHAIN_BIN keys show $CL_NODE_NAME -a); DUMMY_GLOBAL_FILE="dummy_global_$round_id.bin"
-    dd if=/dev/urandom of="uploader/$DUMMY_GLOBAL_FILE" bs=1k count=1 status=none
-    UPLOAD_OUTPUT=$(cd uploader && go run main.go "./$DUMMY_GLOBAL_FILE" "$round_id-global-flstorage" "$CL_NODE_ADDR_SIDE")
+    
+    CL_NODE_ADDR_SIDE=$($SIDECHAIN_BIN keys show $CL_NODE_NAME -a); DUMMY_GLOBAL_FILE="uploader/dummy_global_$round_id.bin"
+    dd if=/dev/urandom of="$DUMMY_GLOBAL_FILE" bs=1k count=1 status=none
+    UPLOAD_OUTPUT=$(./uploader/uploader "$DUMMY_GLOBAL_FILE" "$round_id-global-flstorage" "$CL_NODE_ADDR_SIDE")
     GLOBAL_HASH=$(echo "$UPLOAD_OUTPUT" | grep "Original file hash:" | cut -d' ' -f4)
+    start_time_clnode=$(date +%s.%N)
     $MAINCHAIN_BIN tx fedlearning submit-global-model $round_id $GLOBAL_HASH --from $CL_NODE_NAME --node $MAINCHAIN_NODE -y > /dev/null 2>&1
-    echo "  - CL-node submitted global model hash: $GLOBAL_HASH"
+    end_time_clnode=$(date +%s.%N)
+    
+    # awk 문법 오류 수정 및 시간 출력 추가
+    duration_clnode=$(awk -v start="$start_time_clnode" -v end="$end_time_clnode" 'BEGIN {print end - start}')
+    printf "  - CL-node submitted global model hash: $GLOBAL_HASH in ${CYAN}%.2f s${NC}.\n" $duration_clnode
     
     echo -e "\n${BLUE}Waiting for next round committee to be elected...${NC}"
     NEXT_ROUND_ID=$((round_id + 1))
     while true; do
-        NEXT_COMMITTEE_INFO=$($MAINCHAIN_BIN query fedlearning show-round-committee $NEXT_ROUND_ID --node $MAINCHAIN_NODE -o json 2>/dev/null)
+        NEXT_COMMITTEE_INFO=$($MAINCHAIN_BIN query fedlearning show-round-committee $NEXT_ROUND_ID --node $MAINCHAIN_NODE -o json 2>/dev/null || true)
         if [ -n "$NEXT_COMMITTEE_INFO" ] && [ "$(echo "$NEXT_COMMITTEE_INFO" | jq -r '.round_committee.members[0]')" != "null" ]; then
             echo -e "${GREEN}Committee for Round $NEXT_ROUND_ID has been elected.${NC}"; break
         fi;
-        echo -n "." # 기다리는 동안 점을 찍어 진행 중임을 표시
-        sleep 2
+        echo -n "."
+        sleep 1
     done; echo ""
 done
 
@@ -172,9 +199,7 @@ for (( round_id=$START_ROUND; round_id<$START_ROUND+$TOTAL_ROUNDS_TO_RUN; round_
     ATT_JSON=$($MAINCHAIN_BIN query fedlearning show-final-att $round_id --node $MAINCHAIN_NODE -o json)
     length=$(echo "$ATT_JSON" | jq '.final_att.lnode_addresses | length')
     for (( i=0; i<$length; i++ )); do
-        addr=$(echo "$ATT_JSON" | jq -r ".final_att.lnode_addresses[$i]")
-        score=$(echo "$ATT_JSON" | jq -r ".final_att.scores[$i]")
-        name=${ADDR_TO_NAME[$addr]}
+        addr=$(echo "$ATT_JSON" | jq -r ".final_att.lnode_addresses[$i]"); score=$(echo "$ATT_JSON" | jq -r ".final_att.scores[$i]"); name=${ADDR_TO_NAME[$addr]}
         printf "  - %-6s - Score: %-3s - %s\n" "$name" "$score" "$addr"
     done
     
@@ -183,12 +208,8 @@ for (( round_id=$START_ROUND; round_id<$START_ROUND+$TOTAL_ROUNDS_TO_RUN; round_
     ELECTED_MEMBERS=($(echo "$COMMITTEE_JSON" | jq -r '.round_committee.members[]'))
     is_cl=true
     for addr in "${ELECTED_MEMBERS[@]}"; do
-        if [ "$is_cl" = true ]; then
-            echo "  - ${ADDR_TO_NAME[$addr]} (CL-Node) ($addr)"
-            is_cl=false
-        else
-            echo "  - ${ADDR_TO_NAME[$addr]} ($addr)"
-        fi
+        if [ "$is_cl" = true ]; then echo "  - ${ADDR_TO_NAME[$addr]} (CL-Node) ($addr)"; is_cl=false
+        else echo "  - ${ADDR_TO_NAME[$addr]} ($addr)"; fi
     done
     
     echo "-----------------------------------------------------"
