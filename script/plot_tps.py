@@ -25,6 +25,8 @@ for file in sorted(csv_files):
 
         # 라인 그래프 그리기: x축은 시간(초), y축은 실제 TPS.
         plt.plot(data['second'], data['actual_tps'], marker='o', linestyle='-', label=f'Target Load = {concurrency} tx/sec')
+        # 평균값 텍스트 표시 (색깔 맞춰서 표시, 그래프 오른쪽 끝에) 글자를 살짝 아래로, 글자를 살짝 오른쪽으로 이동
+        plt.text(data['second'].iloc[-1] + 0.8, data['actual_tps'].iloc[-1] - 0.5, f'Avg: {data["actual_tps"].mean():.2f}', fontsize=9, color=plt.gca().lines[-1].get_color(), verticalalignment='bottom', horizontalalignment='left')
 
         # 각 테스트의 평균 TPS를 계산하여 터미널에 출력.
         avg_tps = data['actual_tps'].mean()
