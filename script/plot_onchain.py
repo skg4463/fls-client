@@ -80,7 +80,7 @@ def plot_onchain_logic_time(rounds, agg_times, ele_times):
         pad = max((ymax - ymin) * 0.15, 0.0001)  # 최소 0.1ms 여유
         plt.ylim(max(0.0, ymin - pad), ymax + pad)
     
-    plt.legend()
+    plt.legend(fontsize=12)
     plt.tight_layout()
     plt.savefig('1_onchain_logic_time.png')
     print("그래프 '1_onchain_logic_time.png'가 저장되었습니다.")
@@ -90,10 +90,12 @@ def plot_submission_time(df):
     plt.figure(figsize=(12, 7))
     plt.plot(df['round_id'], df['avg_lnode_time'], marker='o', linestyle='-', label='L-node submit(avg)')
     plt.plot(df['round_id'], df['global_model_time'], marker='s', linestyle='--', label='CL-node submit')
-     # 그래프에 전체 라운드의 평균 시간을 한쪽에 출력
-    plt.axhline(y=df['avg_lnode_time'].mean(), color='blue', linestyle='', label='Avg L-node submit')
-    plt.axhline(y=df['global_model_time'].mean(), color='yellow', linestyle='', label='Avg CL-node submit')
-    # axhline로 그려진 선의 값을 Y축 왼쪽에 텍스트로 표시 
+     # 그래프에 전체 라운드의 평균 시간을 한쪽에 출력, axhline로 그려진 선이 round_id 선의 뒤로 가도록 설정
+    plt.axhline(y=df['avg_lnode_time'].mean(), color='blue', linestyle=':', linewidth=1.7, label='Avg L-node submit', zorder=0)
+    plt.axhline(y=df['global_model_time'].mean(), color='orange', linestyle=':', linewidth=1.7, label='Avg CL-node submit', zorder=0)
+    
+   
+    # axhline로 그려진 선의 값을 Y축 왼쪽에 텍스트로 표시
     plt.text(df['round_id'].min() - 7.2, df['avg_lnode_time'].mean(), f'Avg: {df["avg_lnode_time"].mean():.4f}s', color='blue', fontsize=10)
     plt.text(df['round_id'].min() - 7.2, df['global_model_time'].mean(), f'Avg: {df["global_model_time"].mean():.4f}s', color='orange', fontsize=10)
 
@@ -103,10 +105,10 @@ def plot_submission_time(df):
     plt.grid(True, which='both', linestyle='--', linewidth=0.5)
     
     # Y축 범위 설정
-    plt.ylim(0, 4)
+    plt.ylim(0, 3)
     
     plt.gca().yaxis.set_major_formatter(mticker.FormatStrFormatter('%.4f'))
-    plt.legend()
+    plt.legend(fontsize=12)
     plt.tight_layout()
     plt.savefig('2_submission_time.png')
     print("그래프 '2_submission_time.png'가 저장되었습니다.")
@@ -137,7 +139,7 @@ def plot_total_process_time(df):
     plt.ylim(0, 20)
     
     plt.gca().yaxis.set_major_formatter(mticker.FormatStrFormatter('%.4f'))
-    plt.legend()
+    plt.legend(fontsize=12)
     plt.tight_layout()
     plt.savefig('3_total_process_time.png')
     print("그래프 '3_total_process_time.png'가 저장되었습니다.")

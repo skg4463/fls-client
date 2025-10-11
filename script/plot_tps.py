@@ -24,9 +24,10 @@ for file in sorted(csv_files):
         data = pd.read_csv(file)
 
         # 라인 그래프 그리기: x축은 시간(초), y축은 실제 TPS.
-        plt.plot(data['second'], data['actual_tps'], marker='o', linestyle='-', label=f'Target Load = {concurrency} tx/sec')
-        # 평균값 텍스트 표시 (색깔 맞춰서 표시, 그래프 오른쪽 끝에) 글자를 살짝 아래로, 글자를 살짝 오른쪽으로 이동
-        plt.text(data['second'].iloc[-1] + 0.8, data['actual_tps'].iloc[-1] - 0.5, f'Avg: {data["actual_tps"].mean():.2f}', fontsize=9, color=plt.gca().lines[-1].get_color(), verticalalignment='bottom', horizontalalignment='left')
+        plt.plot(data['second'], data['actual_tps'], marker='o', linestyle='-', label=f'Target Load = {concurrency} tx/sec', linewidth=2.3)
+        # 평균값 라인 두께0.95, 색깔은 그래프 선 색깔과 동일하게, 점선으로 표시, 값 텍스트를 라벨)
+        plt.axhline(y=data['actual_tps'].mean(), color=plt.gca().lines[-1].get_color(), linestyle='--', linewidth=1.3, label=f'Avg TPS ({concurrency} tx/sec) = {data["actual_tps"].mean():.2f}')
+
 
         # 각 테스트의 평균 TPS를 계산하여 터미널에 출력.
         avg_tps = data['actual_tps'].mean()
@@ -39,11 +40,11 @@ for file in sorted(csv_files):
 plt.title('TPS changes over time (comparison by load level)', fontsize=16)
 plt.xlabel('Time', fontsize=12)
 plt.ylabel('Transactions processed per second', fontsize=12)
-plt.legend() 
+plt.legend(fontsize=12) 
 plt.grid(True, which='both', linestyle='--', linewidth=0.5) 
 plt.tight_layout() 
 # y축 범위 고정
-plt.ylim(0, 60)
+plt.ylim(30, 60)
 
 # --- 4. 그래프 저장 ---
 plt.savefig('tps_timeseries_comparison.png')
