@@ -163,7 +163,7 @@ for (( round_id=$START_ROUND; round_id<=$START_ROUND+$TOTAL_ROUNDS_TO_RUN-1; rou
                 addr=$(echo "$ATT_JSON" | jq -r ".final_att.lnode_addresses[$i]"); score=$(echo "$ATT_JSON" | jq -r ".final_att.scores[$i]"); name=${ADDR_TO_NAME[$addr]}
                 printf "  - %-6s - Score: %-3s - %s\n" "$name" "$score" "$addr"
             done; break
-        fi; sleep 1
+        fi; # sleep 1
     done; echo ""
     
     CL_NODE_ADDR=${C_NODES_ADDRS[0]}; CL_NODE_NAME=${ADDR_TO_NAME[$CL_NODE_ADDR]}

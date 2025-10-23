@@ -5,7 +5,7 @@ import matplotlib.ticker as mticker
 
 # 그래프 1 Y축 범위 설정 (초 단위)
 # 예: (0.0, 0.001) => 0 ~ 0.001초 범위, None이면 자동 범위
-GRAPH1_Y_RANGE = (0.0, 0.002)  # 0~0.01초로 변경
+GRAPH1_Y_RANGE = (0.0, 0.005)  # 0~0.01초로 변경
 
 def parse_log_file(log_path):
     import re
@@ -115,18 +115,25 @@ def plot_submission_time(df):
 
 def plot_total_process_time(df):
     """그래프 3: 학습 체인의 프로세스 총 소요 시간을 플롯합니다."""
-    df['total_time'] = df['avg_lnode_time'] + df['avg_cnode_time'] + df['att_aggregation_time'] + df['global_model_time'] - 2
+    df['total_time'] = df['avg_lnode_time'] + df['avg_cnode_time'] + (df['att_aggregation_time']-2) + df['global_model_time']
+    df['submit'] = df['avg_lnode_time'] + df['avg_cnode_time'] + (df['global_model_time'])
     
     plt.figure(figsize=(12, 7))
-    plt.plot(df['round_id'], df['total_time'], marker='o', linestyle='-', color='purple', label='Total Process Time')
+    plt.plot(df['round_id'], df['total_time'], marker='o', linestyle='-', color='purple', label='Round Time')
+    plt.axhline(y=df['total_time'].mean(), color='purple', linestyle='--', label='Average Round Time')
+
+    plt.plot(df['round_id'], df['submit'], marker='s', linestyle='-', color='red', label='L, C, CL Submission')
+
     # att_aggregation_time을 함께 플롯
-    plt.plot(df['round_id'], df['att_aggregation_time']-2, marker='s', linestyle='--', color='green', label='On-chain overhead')
+    # Each side-chain delay + Access control delay(IBC) + main-chain block delay 
+    plt.plot(df['round_id'], df['att_aggregation_time']-2, marker='s', linestyle='-', color='green', label='On-chain Overhead')
+
     # att_aggregation_time의 평균시간 선
-    plt.axhline(y=(df['att_aggregation_time']-2).mean(), color='green', linestyle=':', label='Avg On-chain overhead')
+    plt.axhline(y=(df['att_aggregation_time']-2).mean(), color='green', linestyle='--', label='Avg On-chain Overhead')
     plt.text(df['round_id'].min() - 7.2, (df['att_aggregation_time']-2).mean(), f'Avg: {(df["att_aggregation_time"]-2).mean():.4f}', color='green', fontsize=10)
 
     # 그래프에 전체 라운드의 평균 시간을 한쪽에 출력
-    plt.axhline(y=df['total_time'].mean(), color='purple', linestyle='--', label='Average Total Time')
+
     # axhline로 그려진 선의 값을 Y축 왼쪽에 텍스트로 표시 
     plt.text(df['round_id'].min() - 7.2, df['total_time'].mean(), f'Avg: {df["total_time"].mean():.4f}', color='purple', fontsize=10)
 
