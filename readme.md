@@ -1,6 +1,7 @@
 # fls-client
-This repository is for submitting the original Round learning results of flstorage and uploading and downloading originalHash and tags.
-
+This repository, as part of the PoLC consensus protocol, includes two simulations:
+1. The process of submitting the original learning results from a federated learning round to 'fedstorage' and acquiring the original hash and tag.
+2. The process of uploading the original hash tag generated in step 1 to 'fedlearning.'
 
 ## Environment
 Ignite CLI version:             v29.3.1-dev
